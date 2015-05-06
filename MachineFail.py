@@ -1,34 +1,37 @@
 """
-Machine shop example
+Job excution example
 
 Covers:
 
 - Interrupts
-- Resources: PreemptiveResource
+
 
 Scenario:
-  A workshop has *n* identical machines. A stream of jobs (enough to
+  A ssr_hw has *n* identical machines. A stream of jobs (enough to
   keep the machines busy) arrives. Each machine breaks down
-  periodically. Repairs are carried out by one repairman. The repairman
-  has other, less important tasks to perform, too. Broken machines
-  preempt theses tasks. The repairman continues them when he is done
-  with the machine repair. The workshop works continuously.
+  periodically. Repairs are carried out with exponential amount of time.
+  Broken machines preempt theses tasks. The workshop works continuously.
 
 """
+
 import random
 import simpy
 
 
 RANDOM_SEED = 42
-PT_MEAN = 10.0         # Avg. processing time in minutes
-PT_SIGMA = 2.0         # Sigma of processing time
+
+PT_MEAN = 240.0         # Avg. processing time in minutes
+PT_SIGMA = 60.0         # Sigma of processing time
+
+
 MTTF = 300.0           # Mean time to failure in minutes
 BREAK_MEAN = 1 / MTTF  # Param. for expovariate distribution
-REPAIR_TIME = 30.0     # Time it takes to repair a machine in minutes
-JOB_DURATION = 30.0    # Duration of other jobs in minutes
-NUM_MACHINES = 10      # Number of machines in the machine shop
-WEEKS = 4              # Simulation time in weeks
-SIM_TIME = WEEKS * 7 * 24 * 60  # Simulation time in minutes
+REPAIR_TIME_MEAN = 60.0     # Time it takes to repair a machine in minutes
+OTHER_JOB_TIME_MEAN = 30.0
+
+NUM_MACHINES = 3      # Number of machines in the machine shop
+DAYS = 1              # Simulation time in weeks
+SIM_TIME = 24 * 60  # Simulation time in minutes
 
 
 def time_per_part():
@@ -40,6 +43,13 @@ def time_to_failure():
     """Return time until next failure for a machine."""
     return random.expovariate(BREAK_MEAN)
 
+def time_to_otherjob():
+    """Return time until next other job for the repairman."""
+    return random.expovariate(OTHER_JOB_TIME_MEAN)
+
+def time_to_repair():
+    """Return time until next other job for the repairman."""
+    return random.expovariate(REPAIR_TIME_MEAN)
 
 class Machine(object):
     """A machine produces parts and my get broken every now and then.
@@ -50,17 +60,18 @@ class Machine(object):
     A machine has a *name* and a numberof *parts_made* thus far.
 
     """
-    def __init__(self, env, name, repairman):
+    def __init__(self, env, name, repair):
         self.env = env
         self.name = name
         self.parts_made = 0
         self.broken = False
 
         # Start "working" and "break_machine" processes for this machine.
-        self.process = env.process(self.working(repairman))
+        self.process = env.process(self.working(name, repair))
+        print('%s arriving at ssr_hw at %.1f' % (name, env.now))
         env.process(self.break_machine())
 
-    def working(self, repairman):
+    def working(self, name, repair):
         """Produce parts as long as the simulation runs.
 
         While making a part, the machine may break multiple times.
@@ -84,12 +95,14 @@ class Machine(object):
                     # Request a repairman. This will preempt its "other_job".
                     with repairman.request(priority=1) as req:
                         yield req
-                        yield self.env.timeout(REPAIR_TIME)
+                        yield self.env.timeout(time_to_repair())
 
                     self.broken = False
 
             # Part is done.
             self.parts_made += 1
+            print('%s finished testing in %.1f minutes.' % (name,
+                                                          env.now - start))
 
     def break_machine(self):
         """Break the machine every now and then."""
@@ -104,7 +117,7 @@ def other_jobs(env, repairman):
     """The repairman's other (unimportant) job."""
     while True:
         # Start a new job
-        done_in = JOB_DURATION
+        done_in = time_to_otherjob()
         while done_in:
             # Retry the job until it is done.
             # It's priority is lower than that of machine repairs.
@@ -133,6 +146,6 @@ env.process(other_jobs(env, repairman))
 env.run(until=SIM_TIME)
 
 # Analyis/results
-print('Machine shop results after %s weeks' % WEEKS)
+print('Machine shop results after %s days' % DAYS)
 for machine in machines:
     print('%s made %d parts.' % (machine.name, machine.parts_made))
